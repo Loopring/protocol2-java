@@ -1,6 +1,7 @@
 package org.loopring.protocol2.utils;
 
 import org.loopring.protocol2.pojos.Rings;
+import org.loopring.protocol2.pojos.Order;
 
 public class RingsEncoder {
 
@@ -9,11 +10,15 @@ public class RingsEncoder {
     static class Bitstream {
         private String data;
         public String getData() {
-            if (data.length() == 0) {
+            if (data == null || data.length() == 0) {
                 return "0x0";
             } else {
                 return "0x" + data;
             }
+        }
+
+        public int length() {
+            return data.length() / 2;
         }
 
         public int addBigNumber(Long num) {
@@ -30,6 +35,10 @@ public class RingsEncoder {
 
         public int addNumber(int num) {
             return this.addNumber(num, 4, true);
+        }
+
+        public int addNumber(int num, int numBytes) {
+            return this.addNumber(num, numBytes, true);
         }
 
         public int addNumber(int num, int numBytes, boolean forceAppend) {
@@ -53,6 +62,29 @@ public class RingsEncoder {
             }
         }
 
+        public int addAddress(String addr, int numBytes, boolean forceAppend) {
+            String addrPadded = padString(addr, numBytes * 2);
+            return insert(addrPadded, forceAppend);
+        }
+
+        public int addRawBytes(String bsHex, boolean forceAppend) {
+            return insert(bsHex.substring(2), forceAppend);
+        }
+
+        private String padString(String s, int targetLength) {
+            if (s == null) s = "";
+
+            if (s.length() > targetLength) {
+                throw new IllegalArgumentException(s + " is too big to pad to target length:" +
+                                                   targetLength);
+            }
+
+            while (s.length() < targetLength) {
+                s = "0" + s;
+            }
+            return s;
+        }
+
         private int insert(String s, boolean forceAppend) {
             int offset = data.length() / 2;
             if (!forceAppend) {
@@ -73,35 +105,114 @@ public class RingsEncoder {
         }
     }
 
+    static class RingsSubmitParam {
+        public int[][] ringSpecs;
+        public Bitstream data;
+        public Bitstream tables;
+
+        public RingsSubmitParam() {
+            data = new Bitstream();
+            tables = new Bitstream();
+        }
+    }
+
     public String encode(Rings rings) {
         Bitstream stream = new Bitstream();
         int numSplendables = 6;
-        stream.addNumber(SERIALIZATION_VERSION, 2, true);
-        stream.addNumber(rings.orders.length, 2, true);
-        stream.addNumber(rings.orderIndexesOfRings.length, 2, true);
-        stream.addNumber(numSplendables, 2, true);
+        RingsSubmitParam param = ringsToParam(rings);
 
-        stream.addHex(getTablesData(rings));
+        stream.addNumber(SERIALIZATION_VERSION, 2);
+        stream.addNumber(rings.orders.length, 2);
+        stream.addNumber(rings.orderIndexesOfRings.length, 2);
+        stream.addNumber(numSplendables, 2);
+        stream.addHex(param.tables.getData());
         for(int[] orderIndexes : rings.orderIndexesOfRings) {
-            stream.addNumber(orderIndexes.length, 1, true);
+            stream.addNumber(orderIndexes.length, 1);
             for (int orderIndex : orderIndexes) {
-                stream.addNumber(orderIndex, 1, true);
+                stream.addNumber(orderIndex, 1);
             }
-            stream.addNumber(0, 8 - orderIndexes.length, true);
+            stream.addNumber(0, 8 - orderIndexes.length);
         }
-        stream.addNumber(0, 32, true);
-        stream.addHex(getData(rings));
+        stream.addNumber(0, 32);
+        stream.addHex(param.data.getData());
 
         return stream.getData();
     }
 
-    public String getTablesData(Rings rings) {
-        return "";
+    private RingsSubmitParam ringsToParam(Rings rings) {
+        RingsSubmitParam param = new RingsSubmitParam();
+        param.data.addNumber(0, 32);
+        param.ringSpecs = rings.orderIndexesOfRings;
+        createMiningTable(rings, param);
+
+        for (Order order : rings.orders) {
+            createOrderTable(order, param);
+        }
+
+        return param;
+    }
+
+    private boolean isEmptyOrNull(String s) {
+        return s == null || s.length() == 0;
+    }
+
+    private void createMiningTable(Rings rings, RingsSubmitParam param) {
+        String feeRecipient = rings.feeRecipient;
+        if (isEmptyOrNull(feeRecipient)) {
+            feeRecipient = rings.transactionOrigin;
+        }
+
+        if (!feeRecipient.equals(rings.transactionOrigin)) {
+            insertOffset(param, param.data.addAddress(rings.feeRecipient, 20, false));
+        } else {
+            insertDefault(param);
+        }
+
+        String miner = rings.miner;
+        if (isEmptyOrNull(miner)) {
+            miner = feeRecipient;
+        }
+        if (!miner.equals(feeRecipient)) {
+            insertOffset(param, param.data.addAddress(rings.miner, 20, false));
+        } else {
+            insertDefault(param);
+        }
+
+        if (!isEmptyOrNull(rings.sig) && miner != rings.transactionOrigin) {
+            this.insertOffset(param, param.data.addHex(createBytes(rings.sig), false));
+            addPadding(param);
+        } else {
+            insertDefault(param);
+        }
+    }
+
+    private void createOrderTable(Order order, RingsSubmitParam param) {
 
     }
 
-    public String getData(Rings rings) {
-        return "";
+    private void insertOffset(RingsSubmitParam param, int offset) {
+        if (offset % 4 != 0) {
+            throw new IllegalArgumentException("invalid offset:" + offset);
+        }
+        param.tables.addNumber(offset / 4, 2);
+    }
+
+    private void insertDefault(RingsSubmitParam param) {
+        param.tables.addNumber(0, 2);
+    }
+
+    private void addPadding(RingsSubmitParam param) {
+        int len = param.data.length();
+        if (len % 4 != 0) {
+            param.data.addNumber(0, 4 - (len % 4));
+        }
+    }
+
+    private String createBytes(String data) {
+        Bitstream bitstream = new Bitstream();
+        bitstream.addNumber((data.length() - 2) / 2, 32);
+        bitstream.addRawBytes(data, true);
+        return bitstream.getData();
     }
 
 }
