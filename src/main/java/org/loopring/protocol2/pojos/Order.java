@@ -1,5 +1,8 @@
 package org.loopring.protocol2.pojos;
 
+import lombok.Builder;
+
+@Builder
 public class Order {
     public String owner;
     public String tokenS;

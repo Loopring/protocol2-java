@@ -130,10 +130,10 @@ public class RingsEncoder {
 
         stream.addNumber(SERIALIZATION_VERSION, 2);
         stream.addNumber(rings.orders.length, 2);
-        stream.addNumber(rings.orderIndexesOfRings.length, 2);
+        stream.addNumber(rings.rings.length, 2);
         stream.addNumber(numSplendables, 2);
         stream.addHex(param.tables.getData());
-        for(int[] orderIndexes : rings.orderIndexesOfRings) {
+        for(int[] orderIndexes : rings.rings) {
             stream.addNumber(orderIndexes.length, 1);
             for (int orderIndex : orderIndexes) {
                 stream.addNumber(orderIndex, 1);
@@ -149,7 +149,7 @@ public class RingsEncoder {
     private RingsSubmitParam ringsToParam(Rings rings) {
         RingsSubmitParam param = new RingsSubmitParam();
         param.data.addNumber(0, 32);
-        param.ringSpecs = rings.orderIndexesOfRings;
+        param.ringSpecs = rings.rings;
         createMiningTable(rings, param);
 
         for (Order order : rings.orders) {
